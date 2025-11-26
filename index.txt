@@ -27,15 +27,43 @@ import {
   Check, 
   User, 
   School,
-  ArrowRight
+  ArrowRight,
+  AlertTriangle
 } from 'lucide-react';
 
 // --- Firebase Configuration & Initialization ---
-const firebaseConfig = JSON.parse(__firebase_config);
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
+// Initialize outside component to avoid re-init, but handle errors gracefully
+let app, auth, db;
+let initializationError = null;
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
+try {
+  // Check if config exists (Handle environment where config might be missing)
+  const configStr = typeof __firebase_config !== 'undefined' ? __firebase_config : null;
+  
+  if (!configStr) {
+     // For local development or environments without the injected variable, 
+     // you would typically load from process.env or a config file here.
+     // For this artifact, we set an error if it's missing.
+     // Note: If you are deploying this to GitHub Pages, make sure you have a way to 
+     // load your Firebase config, e.g., creating a firebaseConfig.js file or using .env
+     console.warn("Firebase config not found in global variable.");
+  }
+
+  if (configStr) {
+    const firebaseConfig = JSON.parse(configStr);
+    app = initializeApp(firebaseConfig);
+    auth = getAuth(app);
+    db = getFirestore(app);
+  } else {
+     // Fallback or explicit error for user feedback
+     // In a real deployed app, you'd replace this with your actual config object
+     initializationError = "Firebase configuration is missing.";
+  }
+} catch (error: any) {
+  console.error("Firebase Initialization Error:", error);
+  initializationError = error.message;
+}
 
 // --- Types ---
 type UserMode = 'landing' | 'teacher' | 'student';
@@ -68,17 +96,51 @@ export default function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
+  const [authError, setAuthError] = useState<string | null>(null);
+
+  // --- Error Screen for Initialization ---
+  if (initializationError) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-gray-50 p-6">
+        <div className="max-w-md w-full bg-white p-8 rounded-2xl shadow-xl border border-red-100 text-center">
+          <div className="w-16 h-16 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto mb-6">
+            <AlertTriangle className="w-8 h-8" />
+          </div>
+          <h2 className="text-2xl font-bold text-gray-800 mb-2">設定エラー</h2>
+          <p className="text-gray-600 mb-6">
+            アプリケーションを起動できませんでした。<br/>
+            Firebaseの設定が正しく読み込まれていない可能性があります。
+          </p>
+          <div className="bg-slate-800 text-slate-200 p-4 rounded-lg text-left overflow-auto text-xs font-mono mb-4">
+            Error: {initializationError}
+          </div>
+          <p className="text-xs text-gray-400">
+            GitHub Pages等にデプロイしている場合は、環境変数の設定やconfigファイルの読み込みを確認してください。
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   // --- Authentication ---
   useEffect(() => {
+    if (!auth) return;
+
     const initAuth = async () => {
-      if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-        await signInWithCustomToken(auth, __initial_auth_token);
-      } else {
-        await signInAnonymously(auth);
+      try {
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(auth, __initial_auth_token);
+        } else {
+          await signInAnonymously(auth);
+        }
+      } catch (err: any) {
+        console.error("Auth Error:", err);
+        setAuthError(err.message);
+        setLoading(false);
       }
     };
     initAuth();
+    
     const unsubscribe = onAuthStateChanged(auth, (u) => {
       setUser(u);
       setLoading(false);
@@ -98,7 +160,7 @@ export default function App() {
 
   // --- Real-time Data Listeners ---
   useEffect(() => {
-    if (!user || !roomId || mode === 'landing') return;
+    if (!user || !roomId || mode === 'landing' || !db) return;
 
     // 1. Listen to Participants (Only strictly needed for Teacher, but useful for logic)
     const participantsRef = collection(db, 'artifacts', appId, 'public', 'data', 'classroom_participants');
@@ -141,7 +203,7 @@ export default function App() {
   // --- Actions ---
 
   const createRoom = async () => {
-    if (!user) return;
+    if (!user || !db) return;
     const newRoomId = Math.random().toString(36).substring(2, 8).toUpperCase();
     setRoomId(newRoomId);
     setMode('teacher');
@@ -154,7 +216,7 @@ export default function App() {
   };
 
   const joinRoom = async () => {
-    if (!user || !roomId || !studentName.trim()) return;
+    if (!user || !roomId || !studentName.trim() || !db) return;
     
     // Register participant
     await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'classroom_participants', user.uid), {
@@ -167,7 +229,7 @@ export default function App() {
   };
 
   const sendMessage = async (text: string, targetStudentId: string, targetStudentName: string, senderType: 'teacher' | 'student') => {
-    if (!text.trim()) return;
+    if (!text.trim() || !db) return;
 
     await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'classroom_messages'), {
       roomId,
@@ -182,6 +244,18 @@ export default function App() {
   // --- Render Helpers ---
 
   if (loading) return <div className="flex h-screen items-center justify-center bg-gray-50 text-gray-500">読み込み中...</div>;
+
+  if (authError) {
+     return (
+       <div className="flex h-screen items-center justify-center bg-red-50 p-4">
+        <div className="bg-white p-6 rounded-lg shadow-md max-w-sm text-center">
+          <h3 className="text-red-500 font-bold mb-2">認証エラー</h3>
+          <p className="text-gray-600 text-sm">{authError}</p>
+          <button onClick={() => window.location.reload()} className="mt-4 px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 text-sm">再読み込み</button>
+        </div>
+       </div>
+     )
+  }
 
   return (
     <div className="min-h-screen bg-gray-100 font-sans text-gray-800">
