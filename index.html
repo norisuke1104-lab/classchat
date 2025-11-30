@@ -28,8 +28,8 @@
         import { initializeApp } from 'firebase/app';
         // Googleログイン用の機能を追加でインポート
         import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut } from 'firebase/auth';
-        import { getFirestore, collection, addDoc, onSnapshot, query, where, serverTimestamp, doc, setDoc } from 'firebase/firestore';
-        import { MessageCircle, Users, Send, LogOut, Copy, Check, User, School, ArrowRight, AlertTriangle } from 'lucide-react';
+        import { getFirestore, collection, addDoc, onSnapshot, query, where, serverTimestamp, doc, setDoc, deleteDoc, getDocs } from 'firebase/firestore';
+        import { MessageCircle, Users, Send, LogOut, Copy, Check, User, School, ArrowRight, AlertTriangle, Trash2, Clock } from 'lucide-react';
 
         // --- あなたのFirebase設定 ---
         const firebaseConfig = {
@@ -141,6 +141,12 @@
                 setMode('student');
             };
 
+            // 教師が過去の部屋を選択して再開する場合
+            const resumeRoom = (selectedRoomId) => {
+                setRoomId(selectedRoomId);
+                setMode('teacher');
+            };
+
             const handleLogout = async () => {
                 await signOut(auth);
                 setMode('landing');
@@ -187,7 +193,19 @@
                         </div>
                     </header>
                     <main className="max-w-7xl mx-auto p-4">
-                        {mode === 'landing' && <LandingView roomId={roomId} setRoomId={setRoomId} studentName={studentName} setStudentName={setStudentName} onCreateRoom={createRoom} onJoinRoom={joinRoom} user={user} />}
+                        {mode === 'landing' && (
+                            <LandingView 
+                                roomId={roomId} 
+                                setRoomId={setRoomId} 
+                                studentName={studentName} 
+                                setStudentName={setStudentName} 
+                                onCreateRoom={createRoom} 
+                                onJoinRoom={joinRoom} 
+                                user={user} 
+                                onResumeRoom={resumeRoom}
+                                db={db}
+                            />
+                        )}
                         {mode === 'teacher' && <TeacherDashboard roomId={roomId} participants={participants} messages={messages} onSendMessage={sendMessage} />}
                         {mode === 'student' && user && <StudentDashboard currentUserId={user.uid} messages={messages} onSendMessage={(text) => sendMessage(text, user.uid, studentName, 'student')} />}
                     </main>
@@ -196,8 +214,59 @@
         }
 
         // --- サブコンポーネント ---
-        function LandingView({ roomId, setRoomId, studentName, setStudentName, onCreateRoom, onJoinRoom, user }) {
+        function LandingView({ roomId, setRoomId, studentName, setStudentName, onCreateRoom, onJoinRoom, user, onResumeRoom, db }) {
             const [activeTab, setActiveTab] = useState('student');
+            const [myRooms, setMyRooms] = useState([]);
+            const [loadingRooms, setLoadingRooms] = useState(false);
+
+            // 教師用タブが開かれたら、過去の部屋を取得する
+            useEffect(() => {
+                if (activeTab === 'teacher' && user) {
+                    const fetchRooms = async () => {
+                        setLoadingRooms(true);
+                        try {
+                            const roomsRef = collection(db, 'classroom_rooms');
+                            const q = query(roomsRef, where('teacherId', '==', user.uid));
+                            const snapshot = await getDocs(q);
+                            const rooms = [];
+                            snapshot.forEach(doc => {
+                                rooms.push({ id: doc.id, ...doc.data() });
+                            });
+                            // クライアントサイドで日付ソート（新しい順）
+                            rooms.sort((a, b) => {
+                                const tA = a.createdAt?.toMillis() || 0;
+                                const tB = b.createdAt?.toMillis() || 0;
+                                return tB - tA;
+                            });
+                            setMyRooms(rooms);
+                        } catch (error) {
+                            console.error("Error fetching rooms:", error);
+                        }
+                        setLoadingRooms(false);
+                    };
+                    fetchRooms();
+                }
+            }, [activeTab, user, db]);
+
+            const deleteRoom = async (roomIdToDelete, e) => {
+                e.stopPropagation(); // 親要素のクリックイベント（部屋入室）を防止
+                if (!window.confirm('この部屋を履歴から削除しますか？\n（チャットデータは残りますが、一覧からは消えます）')) return;
+                
+                try {
+                    await deleteDoc(doc(db, 'classroom_rooms', roomIdToDelete));
+                    setMyRooms(prev => prev.filter(r => r.id !== roomIdToDelete));
+                } catch (error) {
+                    console.error("Delete error:", error);
+                    alert("削除に失敗しました");
+                }
+            };
+
+            const formatDate = (timestamp) => {
+                if (!timestamp) return '';
+                const date = timestamp.toDate();
+                return `${date.getMonth() + 1}/${date.getDate()} ${date.getHours()}:${String(date.getMinutes()).padStart(2, '0')}`;
+            };
+
             return (
                 <div className="flex flex-col items-center justify-center pt-10 px-4">
                     <div className="w-full max-w-md bg-white rounded-2xl shadow-xl overflow-hidden">
@@ -219,12 +288,53 @@
                                     </button>
                                 </div>
                             ) : (
-                                <div className="space-y-6 text-center">
-                                    <h2 className="text-2xl font-bold text-gray-800">授業を開始</h2>
-                                    <p className="text-gray-500">Googleアカウントで部屋を作成します</p>
+                                <div className="space-y-6">
+                                    <div className="text-center">
+                                        <h2 className="text-2xl font-bold text-gray-800">授業を開始</h2>
+                                        <p className="text-gray-500 text-sm mt-1">Googleアカウントで部屋を作成します</p>
+                                    </div>
+                                    
                                     <button onClick={onCreateRoom} className="w-full bg-indigo-600 text-white font-bold py-3 rounded-lg hover:bg-indigo-700 transition-colors flex items-center justify-center gap-2">
-                                        {user ? "部屋を作成" : "Googleでログインして作成"} <ArrowRight className="w-5 h-5" />
+                                        {user ? "新しい部屋を作成" : "Googleでログインして作成"} <ArrowRight className="w-5 h-5" />
                                     </button>
+
+                                    {/* 過去の部屋リスト (ログイン時のみ表示) */}
+                                    {user && (
+                                        <div className="mt-6 border-t border-gray-100 pt-4">
+                                            <div className="flex items-center gap-2 text-gray-500 mb-3">
+                                                <Clock className="w-4 h-4" />
+                                                <span className="text-xs font-bold uppercase">最近作成した部屋</span>
+                                            </div>
+                                            
+                                            {loadingRooms ? (
+                                                <div className="text-center text-gray-400 text-xs py-4">読み込み中...</div>
+                                            ) : myRooms.length === 0 ? (
+                                                <div className="text-center text-gray-400 text-xs py-4">履歴はありません</div>
+                                            ) : (
+                                                <div className="space-y-2 max-h-60 overflow-y-auto pr-1 scrollbar-thin">
+                                                    {myRooms.map(room => (
+                                                        <div 
+                                                            key={room.id} 
+                                                            onClick={() => onResumeRoom(room.id)}
+                                                            className="flex items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded-lg hover:bg-indigo-50 hover:border-indigo-200 cursor-pointer group transition-all"
+                                                        >
+                                                            <div>
+                                                                <div className="font-mono font-bold text-indigo-700">{room.id}</div>
+                                                                <div className="text-xs text-gray-400">{formatDate(room.createdAt)} 作成</div>
+                                                            </div>
+                                                            <button 
+                                                                onClick={(e) => deleteRoom(room.id, e)}
+                                                                className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-full transition-colors opacity-0 group-hover:opacity-100"
+                                                                title="履歴から削除"
+                                                            >
+                                                                <Trash2 className="w-4 h-4" />
+                                                            </button>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
                                 </div>
                             )}
                         </div>
