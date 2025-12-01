@@ -274,7 +274,14 @@
                         {mode === 'student' && user && (
                             <StudentDashboard 
                                 user={user} roomName={currentRoomName}
-                                messages={messages} onSendMessage={sendMessage} onDeleteMessage={deleteMessage}
+                                messages={messages} 
+                                onSendMessage={(text) => {
+                                    // 修正: 送信ボタンが押されたとき、参加者リストから自分の最新の名前を取得して送信する
+                                    const myInfo = participants.find(p => p.id === user.uid);
+                                    const name = myInfo ? myInfo.name : (user.displayName || '名無し');
+                                    sendMessage(text, user.uid, name, 'student');
+                                }}
+                                onDeleteMessage={deleteMessage}
                                 onUpdateStatus={updateParticipantStatus} participants={participants}
                             />
                         )}
