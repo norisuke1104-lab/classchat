@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ClassChat</title>
+    <title>ClassChat Pro</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script type="importmap">
     {
@@ -18,22 +18,30 @@
     }
     </script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+        /* カスタムスクロールバー */
+        .scrollbar-thin::-webkit-scrollbar { width: 6px; }
+        .scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
+        .scrollbar-thin::-webkit-scrollbar-thumb { background-color: #cbd5e1; border-radius: 20px; }
+    </style>
 </head>
-<body class="bg-gray-100">
+<body class="bg-gray-100 text-gray-800">
     <div id="root"></div>
 
     <script type="text/babel" data-type="module" data-presets="react,typescript">
         import React, { useState, useEffect, useRef, useMemo } from 'react';
         import { createRoot } from 'react-dom/client';
         import { initializeApp } from 'firebase/app';
-        // Googleログイン用の機能を追加でインポート
         import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut } from 'firebase/auth';
-        // updateDocを追加
         import { getFirestore, collection, addDoc, onSnapshot, query, where, serverTimestamp, doc, setDoc, deleteDoc, getDocs, updateDoc } from 'firebase/firestore';
-        // LogIn, DoorOpen アイコンを追加
-        import { MessageCircle, Users, Send, LogOut, Copy, Check, User, School, ArrowRight, AlertTriangle, Trash2, Clock, Pencil, Save, X, LogIn, DoorOpen } from 'lucide-react';
+        // ArrowRightを追加しました
+        import { 
+            School, User, LogIn, LogOut, DoorOpen, Copy, Check, 
+            MessageCircle, Send, Trash2, Clock, Pencil, Save, X, 
+            Hand, Circle, ArrowUpDown, Download, HelpCircle, ThumbsUp, CheckCircle2, ArrowRight
+        } from 'lucide-react';
 
-        // --- あなたのFirebase設定 ---
+        // --- Firebase Config ---
         const firebaseConfig = {
             apiKey: "AIzaSyC9vqXA2mLhqx2jHH4v53Jc2Jvp6rswI2s",
             authDomain: "classchat-6c29f.firebaseapp.com",
@@ -44,27 +52,37 @@
             measurementId: "G-S2JYFQD7E0"
         };
 
-        // Firebaseの初期化
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
         const db = getFirestore(app);
-        const provider = new GoogleAuthProvider(); // Googleログインプロバイダ
+        const provider = new GoogleAuthProvider();
 
-        // --- アプリ本体のコード ---
+        // --- Helpers ---
+        const formatTime = (timestamp) => {
+            if (!timestamp) return '';
+            const date = timestamp.toDate();
+            return `${date.getHours()}:${String(date.getMinutes()).padStart(2, '0')}`;
+        };
+
+        const formatDateFull = (timestamp) => {
+             if (!timestamp) return '';
+             const date = timestamp.toDate();
+             return `${date.getFullYear()}/${date.getMonth()+1}/${date.getDate()} ${date.getHours()}:${String(date.getMinutes()).padStart(2, '0')}`;
+        };
+
+        // --- Components ---
         function App() {
             const [user, setUser] = useState(null);
             const [mode, setMode] = useState('landing');
             const [roomId, setRoomId] = useState('');
             const [studentName, setStudentName] = useState('');
+            const [currentRoomName, setCurrentRoomName] = useState('');
+            
+            // Data
             const [messages, setMessages] = useState([]);
             const [participants, setParticipants] = useState([]);
             const [loading, setLoading] = useState(true);
-            const [authError, setAuthError] = useState(null);
-            
-            // 現在のルーム名（DB同期用）
-            const [currentRoomName, setCurrentRoomName] = useState('');
 
-            // ログイン状態の監視
             useEffect(() => {
                 const unsubscribe = onAuthStateChanged(auth, (u) => {
                     setUser(u);
@@ -73,14 +91,13 @@
                 return () => unsubscribe();
             }, []);
 
-            // URLパラメータのチェック
             useEffect(() => {
                 const params = new URLSearchParams(window.location.search);
                 const roomParam = params.get('room');
                 if (roomParam) setRoomId(roomParam);
             }, []);
 
-            // ルーム情報の監視（名前などの変更をリアルタイム反映）
+            // Room Metadata Listener
             useEffect(() => {
                 if (!roomId) {
                     setCurrentRoomName('');
@@ -95,7 +112,7 @@
                 return () => unsubscribe();
             }, [roomId]);
 
-            // 参加者とメッセージの監視
+            // Main Data Listener
             useEffect(() => {
                 if (!user || !roomId || mode === 'landing') return;
 
@@ -119,29 +136,23 @@
                 return () => { unsubParticipants(); unsubMessages(); };
             }, [user, roomId, mode]);
 
-            // Googleログイン処理
+            // Actions
             const handleGoogleLogin = async () => {
                 try {
                     const result = await signInWithPopup(auth, provider);
                     return result.user;
                 } catch (error) {
-                    console.error("Login Error:", error);
-                    alert("ログインに失敗しました: " + error.message);
+                    alert("ログインエラー: " + error.message);
                     return null;
                 }
             };
 
-            // 部屋作成（名前付き）
             const createRoom = async (nameInput) => {
-                // 未ログインなら先にログインさせる
                 const currentUser = user || await handleGoogleLogin();
                 if (!currentUser) return;
-
                 const newRoomId = Math.random().toString(36).substring(2, 8).toUpperCase();
                 setRoomId(newRoomId);
                 setMode('teacher');
-                
-                // 名前と一緒に保存
                 await setDoc(doc(db, 'classroom_rooms', newRoomId), {
                     createdAt: serverTimestamp(),
                     teacherId: currentUser.uid,
@@ -151,44 +162,35 @@
 
             const joinRoom = async () => {
                 if (!roomId) return;
-                
-                // 未ログインなら先にログインさせる
                 const currentUser = user || await handleGoogleLogin();
                 if (!currentUser) return;
-
-                // 名前が入力されていればそれを、空ならGoogleの名前を使う
                 const finalName = studentName.trim() || currentUser.displayName || "名無し";
-
                 await setDoc(doc(db, 'classroom_participants', currentUser.uid), {
                     roomId: roomId,
                     name: finalName,
-                    joinedAt: serverTimestamp()
+                    joinedAt: serverTimestamp(),
+                    handRaised: false, // 初期状態
+                    vote: null         // 初期状態
                 });
                 setMode('student');
             };
 
-            const resumeRoom = (selectedRoomId) => {
-                setRoomId(selectedRoomId);
-                setMode('teacher');
-            };
+            const resumeRoom = (id) => { setRoomId(id); setMode('teacher'); };
 
-            // 退室処理（ログイン状態は維持）
-            const handleExitRoom = () => {
-                if (!window.confirm("部屋から退室しますか？")) return;
+            const handleExit = () => {
+                if(!confirm("退室しますか？")) return;
                 setMode('landing');
                 setRoomId('');
                 setMessages([]);
                 window.history.pushState({}, '', window.location.pathname);
             };
 
-            // ログアウト処理（完全にサインアウト）
             const handleLogout = async () => {
-                if (!window.confirm("ログアウトしますか？")) return;
+                if(!confirm("ログアウトしますか？")) return;
                 await signOut(auth);
                 setMode('landing');
                 setRoomId('');
                 setMessages([]);
-                window.history.pushState({}, '', window.location.pathname);
             };
 
             const sendMessage = async (text, targetStudentId, targetStudentName, senderType) => {
@@ -199,117 +201,81 @@
                     studentName: targetStudentName,
                     text: text,
                     senderType,
-                    timestamp: serverTimestamp()
+                    timestamp: serverTimestamp(),
+                    deleted: false
                 });
             };
 
-            // ルーム名変更
+            // メッセージ削除（論理削除）
+            const deleteMessage = async (msgId) => {
+                if(!confirm("このメッセージを削除しますか？")) return;
+                await updateDoc(doc(db, 'classroom_messages', msgId), {
+                    deleted: true,
+                    text: '（削除されました）'
+                });
+            };
+
             const updateRoomName = async (newName) => {
                 if (!roomId || !newName.trim()) return;
-                const roomRef = doc(db, 'classroom_rooms', roomId);
-                await updateDoc(roomRef, {
-                    name: newName
-                });
+                await updateDoc(doc(db, 'classroom_rooms', roomId), { name: newName });
             };
 
-            if (loading) return <div className="flex h-screen items-center justify-center bg-gray-50 text-gray-500">読み込み中...</div>;
+            // 生徒リアクション更新
+            const updateParticipantStatus = async (uid, data) => {
+                await updateDoc(doc(db, 'classroom_participants', uid), data);
+            };
+
+            if (loading) return <div className="flex h-screen items-center justify-center text-gray-500">読み込み中...</div>;
 
             return (
-                <div className="min-h-screen bg-gray-100 font-sans text-gray-800">
-                    <header className="bg-white shadow-sm sticky top-0 z-10">
-                        <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
-                            <div className="flex items-center gap-2 overflow-hidden">
-                                <School className="text-indigo-600 w-6 h-6 flex-shrink-0" />
-                                <div className="flex flex-col">
-                                    <h1 className="font-bold text-lg md:text-xl text-gray-800 leading-tight">ClassChat</h1>
-                                    {/* ようこそメッセージ（ログイン中のみ） */}
-                                    {user && (
-                                        <span className="text-xs text-gray-500 hidden md:block">
-                                            ようこそ！{user.displayName}さん
-                                        </span>
-                                    )}
-                                </div>
-                            </div>
-                            
-                            <div className="flex items-center gap-2 md:gap-4">
-                                {/* ルーム名表示 (入室中のみ) */}
-                                {mode !== 'landing' && currentRoomName && (
-                                    <span className="text-xs font-bold text-indigo-700 bg-indigo-50 px-2 py-1 rounded hidden lg:block truncate max-w-[150px]">
-                                        {currentRoomName}
-                                    </span>
-                                )}
-
-                                {/* ルームID表示 (入室中のみ) */}
-                                {mode !== 'landing' && (
-                                    <div className="bg-indigo-50 px-3 py-1 rounded-lg hidden md:block">
-                                        <span className="text-xs text-indigo-500 uppercase font-bold mr-2">Room ID</span>
-                                        <span className="font-mono font-bold text-indigo-700 text-lg">{roomId}</span>
-                                    </div>
-                                )}
-
-                                {/* 退室ボタン (入室中のみ表示) */}
-                                {mode !== 'landing' && (
-                                    <button 
-                                        onClick={handleExitRoom} 
-                                        className="bg-gray-100 hover:bg-gray-200 text-gray-600 px-3 py-2 rounded-lg text-sm flex items-center gap-1 transition-colors"
-                                        title="退室する（ログインしたままトップへ戻る）"
-                                    >
-                                        <DoorOpen className="w-4 h-4" /> <span className="hidden md:inline">退室</span>
-                                    </button>
-                                )}
-
-                                {/* ログイン/ログアウトボタン */}
-                                {user ? (
-                                    <button 
-                                        onClick={handleLogout} 
-                                        className="text-gray-500 hover:text-red-500 text-sm flex items-center gap-1 px-2 py-1"
-                                        title="ログアウト"
-                                    >
-                                        <LogOut className="w-5 h-5" /> 
-                                        <span className="hidden md:inline">ログアウト</span>
-                                    </button>
-                                ) : (
-                                    <button 
-                                        onClick={handleGoogleLogin} 
-                                        className="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold px-4 py-2 rounded-lg flex items-center gap-1 transition-colors"
-                                    >
-                                        <LogIn className="w-4 h-4" /> ログイン
-                                    </button>
-                                )}
+                <div className="min-h-screen flex flex-col font-sans">
+                    <header className="bg-white shadow-sm sticky top-0 z-20 h-14 md:h-16 flex items-center justify-between px-4">
+                        <div className="flex items-center gap-2 overflow-hidden">
+                            <School className="text-indigo-600 w-5 h-5 md:w-6 md:h-6 flex-shrink-0" />
+                            <div className="flex flex-col">
+                                <h1 className="font-bold text-base md:text-lg leading-tight">ClassChat <span className="text-indigo-600">Pro</span></h1>
+                                {user && <span className="text-[10px] text-gray-500 hidden md:block">Login: {user.displayName}</span>}
                             </div>
                         </div>
+                        <div className="flex items-center gap-2">
+                            {mode !== 'landing' && currentRoomName && (
+                                <span className="text-xs font-bold text-indigo-700 bg-indigo-50 px-2 py-1 rounded hidden lg:block truncate max-w-[150px]">{currentRoomName}</span>
+                            )}
+                            {mode !== 'landing' && (
+                                <>
+                                    <div className="bg-indigo-50 px-2 py-1 rounded hidden md:block">
+                                        <span className="text-[10px] text-indigo-500 font-bold mr-1">ID</span>
+                                        <span className="font-mono font-bold text-indigo-700">{roomId}</span>
+                                    </div>
+                                    <button onClick={handleExit} className="bg-gray-100 hover:bg-gray-200 text-gray-600 px-3 py-1.5 rounded text-xs flex items-center gap-1"><DoorOpen className="w-3 h-3"/> 退室</button>
+                                </>
+                            )}
+                            {user ? (
+                                <button onClick={handleLogout} className="text-gray-400 hover:text-red-500 px-2"><LogOut className="w-4 h-4"/></button>
+                            ) : (
+                                <button onClick={handleGoogleLogin} className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-3 py-2 rounded flex items-center gap-1"><LogIn className="w-3 h-3"/> ログイン</button>
+                            )}
+                        </div>
                     </header>
-                    <main className="max-w-7xl mx-auto p-4">
+                    <main className="flex-1 max-w-[1600px] w-full mx-auto p-2 md:p-4">
                         {mode === 'landing' && (
                             <LandingView 
-                                roomId={roomId} 
-                                setRoomId={setRoomId} 
-                                studentName={studentName} 
-                                setStudentName={setStudentName} 
-                                onCreateRoom={createRoom} 
-                                onJoinRoom={joinRoom} 
-                                user={user} 
-                                onResumeRoom={resumeRoom}
-                                db={db}
-                                onLogin={handleGoogleLogin}
+                                roomId={roomId} setRoomId={setRoomId} studentName={studentName} setStudentName={setStudentName}
+                                onCreateRoom={createRoom} onJoinRoom={joinRoom} user={user} onResumeRoom={resumeRoom} db={db}
                             />
                         )}
                         {mode === 'teacher' && (
                             <TeacherDashboard 
-                                roomId={roomId} 
-                                roomName={currentRoomName}
-                                onUpdateRoomName={updateRoomName}
-                                participants={participants} 
-                                messages={messages} 
-                                onSendMessage={sendMessage} 
+                                roomId={roomId} roomName={currentRoomName} onUpdateRoomName={updateRoomName}
+                                participants={participants} messages={messages} onSendMessage={sendMessage}
+                                onDeleteMessage={deleteMessage}
                             />
                         )}
                         {mode === 'student' && user && (
                             <StudentDashboard 
-                                currentUserId={user.uid} 
-                                roomName={currentRoomName}
-                                messages={messages} 
-                                onSendMessage={(text) => sendMessage(text, user.uid, studentName, 'student')} 
+                                user={user} roomName={currentRoomName}
+                                messages={messages} onSendMessage={sendMessage} onDeleteMessage={deleteMessage}
+                                onUpdateStatus={updateParticipantStatus} participants={participants}
                             />
                         )}
                     </main>
@@ -317,156 +283,69 @@
             );
         }
 
-        // --- サブコンポーネント ---
-        function LandingView({ roomId, setRoomId, studentName, setStudentName, onCreateRoom, onJoinRoom, user, onResumeRoom, db, onLogin }) {
+        // --- Landing View ---
+        function LandingView({ roomId, setRoomId, studentName, setStudentName, onCreateRoom, onJoinRoom, user, onResumeRoom, db }) {
             const [activeTab, setActiveTab] = useState('student');
             const [myRooms, setMyRooms] = useState([]);
-            const [loadingRooms, setLoadingRooms] = useState(false);
-            const [newRoomName, setNewRoomName] = useState(''); // 新規ルーム名用
+            const [newRoomName, setNewRoomName] = useState('');
 
-            // 教師用タブが開かれたら、過去の部屋を取得する
             useEffect(() => {
                 if (activeTab === 'teacher' && user) {
-                    const fetchRooms = async () => {
-                        setLoadingRooms(true);
-                        try {
-                            const roomsRef = collection(db, 'classroom_rooms');
-                            const q = query(roomsRef, where('teacherId', '==', user.uid));
-                            const snapshot = await getDocs(q);
-                            const rooms = [];
-                            snapshot.forEach(doc => {
-                                rooms.push({ id: doc.id, ...doc.data() });
-                            });
-                            // クライアントサイドで日付ソート（新しい順）
-                            rooms.sort((a, b) => {
-                                const tA = a.createdAt?.toMillis() || 0;
-                                const tB = b.createdAt?.toMillis() || 0;
-                                return tB - tA;
-                            });
-                            setMyRooms(rooms);
-                        } catch (error) {
-                            console.error("Error fetching rooms:", error);
-                        }
-                        setLoadingRooms(false);
-                    };
-                    fetchRooms();
+                    const q = query(collection(db, 'classroom_rooms'), where('teacherId', '==', user.uid));
+                    getDocs(q).then(snap => {
+                        const rooms = [];
+                        snap.forEach(d => rooms.push({ id: d.id, ...d.data() }));
+                        rooms.sort((a, b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0));
+                        setMyRooms(rooms);
+                    });
                 }
-            }, [activeTab, user, db]);
+            }, [activeTab, user]);
 
-            const deleteRoom = async (roomIdToDelete, e) => {
+            const deleteRoom = async (rid, e) => {
                 e.stopPropagation();
-                if (!window.confirm('この部屋を履歴から削除しますか？\n（チャットデータは残りますが、一覧からは消えます）')) return;
-                
-                try {
-                    await deleteDoc(doc(db, 'classroom_rooms', roomIdToDelete));
-                    setMyRooms(prev => prev.filter(r => r.id !== roomIdToDelete));
-                } catch (error) {
-                    console.error("Delete error:", error);
-                    alert("削除に失敗しました");
-                }
-            };
-
-            const formatDate = (timestamp) => {
-                if (!timestamp) return '';
-                const date = timestamp.toDate();
-                return `${date.getMonth() + 1}/${date.getDate()} ${date.getHours()}:${String(date.getMinutes()).padStart(2, '0')}`;
+                if(!confirm('履歴から削除しますか？')) return;
+                await deleteDoc(doc(db, 'classroom_rooms', rid));
+                setMyRooms(prev => prev.filter(r => r.id !== rid));
             };
 
             return (
-                <div className="flex flex-col items-center justify-center pt-10 px-4">
-                    <div className="w-full max-w-md bg-white rounded-2xl shadow-xl overflow-hidden">
+                <div className="flex flex-col items-center pt-8 px-4">
+                    <div className="w-full max-w-md bg-white rounded-xl shadow-lg overflow-hidden">
                         <div className="flex border-b border-gray-100">
-                            <button onClick={() => setActiveTab('student')} className={`flex-1 py-4 text-sm font-semibold flex items-center justify-center gap-2 ${activeTab === 'student' ? 'bg-indigo-50 text-indigo-600 border-b-2 border-indigo-600' : 'text-gray-500'}`}><User className="w-4 h-4" /> 生徒として参加</button>
-                            <button onClick={() => setActiveTab('teacher')} className={`flex-1 py-4 text-sm font-semibold flex items-center justify-center gap-2 ${activeTab === 'teacher' ? 'bg-indigo-50 text-indigo-600 border-b-2 border-indigo-600' : 'text-gray-500'}`}><School className="w-4 h-4" /> 教師として開始</button>
+                            <button onClick={()=>setActiveTab('student')} className={`flex-1 py-3 text-sm font-bold flex items-center justify-center gap-2 ${activeTab === 'student' ? 'bg-indigo-50 text-indigo-600 border-b-2 border-indigo-600' : 'text-gray-500'}`}><User className="w-4 h-4"/> 生徒</button>
+                            <button onClick={()=>setActiveTab('teacher')} className={`flex-1 py-3 text-sm font-bold flex items-center justify-center gap-2 ${activeTab === 'teacher' ? 'bg-indigo-50 text-indigo-600 border-b-2 border-indigo-600' : 'text-gray-500'}`}><School className="w-4 h-4"/> 教師</button>
                         </div>
-                        <div className="p-8">
+                        <div className="p-6 space-y-4">
                             {activeTab === 'student' ? (
-                                <div className="space-y-4">
-                                    <h2 className="text-2xl font-bold text-center text-gray-800">授業に参加</h2>
-                                    <div className="text-center text-xs text-gray-400 mb-2">
-                                        {user ? (
-                                            <span className="text-green-600 font-bold flex items-center justify-center gap-1">
-                                                <Check className="w-3 h-3" /> ログイン中: {user.displayName}
-                                            </span>
-                                        ) : (
-                                            "ログインして履歴を残すことができます"
-                                        )}
-                                    </div>
-                                    <input type="text" value={roomId} onChange={(e) => setRoomId(e.target.value.toUpperCase())} placeholder="部屋ID (例: X7Y2Z9)" className="w-full bg-gray-50 border rounded-lg px-4 py-3 text-lg uppercase font-mono" />
-                                    <input type="text" value={studentName} onChange={(e) => setStudentName(e.target.value)} placeholder="表示名 (空欄ならGoogle名)" className="w-full bg-gray-50 border rounded-lg px-4 py-3 text-lg" />
-                                    <button onClick={onJoinRoom} disabled={!roomId} className="w-full bg-indigo-600 text-white font-bold py-3 rounded-lg disabled:bg-gray-300 hover:bg-indigo-700 transition-colors flex items-center justify-center gap-2">
-                                        {user ? "入室する" : "Googleでログインして入室"} <ArrowRight className="w-5 h-5" />
-                                    </button>
-                                </div>
+                                <>
+                                    <h2 className="text-lg font-bold text-center">授業に参加</h2>
+                                    <input value={roomId} onChange={e=>setRoomId(e.target.value.toUpperCase())} placeholder="部屋ID (例: X7Y2Z9)" className="w-full bg-gray-50 border rounded-lg px-4 py-3 uppercase font-mono" />
+                                    <input value={studentName} onChange={e=>setStudentName(e.target.value)} placeholder="表示名 (空欄ならGoogle名)" className="w-full bg-gray-50 border rounded-lg px-4 py-3" />
+                                    <button onClick={onJoinRoom} disabled={!roomId} className="w-full bg-indigo-600 text-white font-bold py-3 rounded-lg hover:bg-indigo-700 flex items-center justify-center gap-2">{user ? "入室" : "Googleで入室"} <ArrowRight className="w-4 h-4"/></button>
+                                </>
                             ) : (
-                                <div className="space-y-6">
-                                    <div className="text-center">
-                                        <h2 className="text-2xl font-bold text-gray-800">授業を開始</h2>
-                                        <p className="text-gray-500 text-sm mt-1">
-                                            {user ? "新しい部屋を作成します" : "Googleアカウントでログインが必要です"}
-                                        </p>
-                                    </div>
+                                <>
+                                    <h2 className="text-lg font-bold text-center">授業を開始</h2>
+                                    <input value={newRoomName} onChange={e=>setNewRoomName(e.target.value)} placeholder="ルーム名 (例: 数学IA)" className="w-full bg-gray-50 border rounded-lg px-4 py-3" />
+                                    <button onClick={()=>onCreateRoom(newRoomName)} className="w-full bg-indigo-600 text-white font-bold py-3 rounded-lg hover:bg-indigo-700 flex items-center justify-center gap-2">{user ? "作成" : "Googleで作成"} <ArrowRight className="w-4 h-4"/></button>
                                     
-                                    <div className="space-y-2">
-                                        <label className="block text-xs font-bold text-gray-500 uppercase text-left">ルーム名（任意）</label>
-                                        <input 
-                                            type="text" 
-                                            value={newRoomName} 
-                                            onChange={(e) => setNewRoomName(e.target.value)} 
-                                            placeholder="例: 1年2組 数学" 
-                                            className="w-full bg-gray-50 border rounded-lg px-4 py-3 text-base" 
-                                        />
-                                    </div>
-
-                                    <button onClick={() => onCreateRoom(newRoomName)} className="w-full bg-indigo-600 text-white font-bold py-3 rounded-lg hover:bg-indigo-700 transition-colors flex items-center justify-center gap-2">
-                                        {user ? "新しい部屋を作成" : "Googleでログインして作成"} <ArrowRight className="w-5 h-5" />
-                                    </button>
-
-                                    {/* 過去の部屋リスト */}
-                                    {user ? (
-                                        <div className="mt-6 border-t border-gray-100 pt-4 text-left">
-                                            <div className="flex items-center gap-2 text-gray-500 mb-3">
-                                                <Clock className="w-4 h-4" />
-                                                <span className="text-xs font-bold uppercase">最近作成した部屋</span>
-                                            </div>
-                                            
-                                            {loadingRooms ? (
-                                                <div className="text-center text-gray-400 text-xs py-4">読み込み中...</div>
-                                            ) : myRooms.length === 0 ? (
-                                                <div className="text-center text-gray-400 text-xs py-4">履歴はありません</div>
-                                            ) : (
-                                                <div className="space-y-2 max-h-60 overflow-y-auto pr-1 scrollbar-thin">
-                                                    {myRooms.map(room => (
-                                                        <div 
-                                                            key={room.id} 
-                                                            onClick={() => onResumeRoom(room.id)}
-                                                            className="flex items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded-lg hover:bg-indigo-50 hover:border-indigo-200 cursor-pointer group transition-all"
-                                                        >
-                                                            <div className="overflow-hidden">
-                                                                <div className="font-bold text-gray-800 truncate">{room.name || '名称未設定'}</div>
-                                                                <div className="flex items-center gap-2 mt-0.5">
-                                                                    <span className="font-mono text-xs bg-indigo-100 text-indigo-700 px-1 rounded">{room.id}</span>
-                                                                    <span className="text-xs text-gray-400">{formatDate(room.createdAt)}</span>
-                                                                </div>
-                                                            </div>
-                                                            <button 
-                                                                onClick={(e) => deleteRoom(room.id, e)}
-                                                                className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-full transition-colors opacity-0 group-hover:opacity-100"
-                                                                title="履歴から削除"
-                                                            >
-                                                                <Trash2 className="w-4 h-4" />
-                                                            </button>
+                                    {user && myRooms.length > 0 && (
+                                        <div className="mt-4 pt-4 border-t border-gray-100">
+                                            <p className="text-xs font-bold text-gray-500 mb-2">履歴</p>
+                                            <div className="max-h-48 overflow-y-auto space-y-2">
+                                                {myRooms.map(r => (
+                                                    <div key={r.id} onClick={()=>onResumeRoom(r.id)} className="flex justify-between items-center p-2 bg-gray-50 border rounded hover:bg-indigo-50 cursor-pointer group">
+                                                        <div className="truncate flex-1">
+                                                            <div className="font-bold text-sm truncate">{r.name}</div>
+                                                            <div className="text-[10px] text-gray-400 font-mono">{r.id}</div>
                                                         </div>
-                                                    ))}
-                                                </div>
-                                            )}
-                                        </div>
-                                    ) : (
-                                        <div className="mt-4 p-4 bg-gray-50 rounded-lg text-center">
-                                            <p className="text-sm text-gray-500 mb-2">ログインすると過去の履歴を表示できます</p>
+                                                        <button onClick={(e)=>deleteRoom(r.id,e)} className="p-1.5 text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100"><Trash2 className="w-3 h-3"/></button>
+                                                    </div>
+                                                ))}
+                                            </div>
                                         </div>
                                     )}
-                                </div>
+                                </>
                             )}
                         </div>
                     </div>
@@ -474,136 +353,229 @@
             );
         }
 
-        function TeacherDashboard({ roomId, roomName, onUpdateRoomName, participants, messages, onSendMessage }) {
-            const [copied, setCopied] = useState(false);
+        // --- Teacher Dashboard ---
+        function TeacherDashboard({ roomId, roomName, onUpdateRoomName, participants, messages, onSendMessage, onDeleteMessage }) {
             const [isEditing, setIsEditing] = useState(false);
             const [editName, setEditName] = useState('');
+            const [sortMode, setSortMode] = useState('join'); // 'join' | 'name'
 
-            // 編集モード開始時に現在の名前をセット
-            useEffect(() => {
-                if(isEditing) setEditName(roomName);
-            }, [isEditing, roomName]);
+            useEffect(() => { if(isEditing) setEditName(roomName); }, [isEditing, roomName]);
 
+            // CSV Export
+            const handleExport = () => {
+                const header = "日時,送信者ID,送信者名,種別,メッセージ\n";
+                const rows = messages.map(m => {
+                    const time = formatDateFull(m.timestamp);
+                    const text = m.text.replace(/"/g, '""'); // CSV escape
+                    return `"${time}","${m.studentId}","${m.studentName}","${m.senderType}","${text}"`;
+                }).join("\n");
+                
+                const blob = new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), header + rows], { type: 'text/csv;charset=utf-8;' });
+                const link = document.createElement("a");
+                link.href = URL.createObjectURL(blob);
+                link.download = `chat_log_${roomId}_${new Date().toISOString().slice(0,10)}.csv`;
+                link.click();
+            };
+
+            // Sorting & Grouping
             const studentThreads = useMemo(() => {
-                const threads = {};
-                participants.forEach(p => threads[p.id] = []);
-                messages.forEach(m => { if (!threads[m.studentId]) threads[m.studentId] = []; threads[m.studentId].push(m); });
-                return threads;
-            }, [participants, messages]);
-            
-            const copyLink = () => {
-                const url = `${window.location.origin}${window.location.pathname}?room=${roomId}`;
-                navigator.clipboard.writeText(url).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); }).catch(() => prompt("URL:", url));
-            };
+                // 生徒リストを並べ替え
+                const sortedParticipants = [...participants].sort((a, b) => {
+                    if (sortMode === 'name') return a.name.localeCompare(b.name, 'ja');
+                    return (a.joinedAt?.toMillis() || 0) - (b.joinedAt?.toMillis() || 0);
+                });
 
-            const handleSaveName = async () => {
-                await onUpdateRoomName(editName);
-                setIsEditing(false);
-            };
+                // メッセージのマッピング
+                const threads = [];
+                sortedParticipants.forEach(p => {
+                    const msgs = messages.filter(m => m.studentId === p.id);
+                    threads.push({ participant: p, messages: msgs });
+                });
+                return threads;
+            }, [participants, messages, sortMode]);
 
             return (
-                <div className="space-y-6">
-                    {/* ヘッダーカード */}
-                    <div className="bg-white p-4 rounded-xl shadow-sm border flex flex-col gap-4">
-                        
-                        {/* 上段：ルーム名編集エリア */}
-                        <div className="flex items-center justify-between border-b border-gray-100 pb-4">
+                <div className="space-y-4 h-[calc(100vh-80px)] flex flex-col">
+                    {/* Toolbar */}
+                    <div className="bg-white p-3 rounded-xl shadow-sm border flex flex-wrap gap-3 items-center justify-between flex-shrink-0">
+                        <div className="flex items-center gap-2 flex-1 min-w-[200px]">
                             {isEditing ? (
-                                <div className="flex items-center gap-2 w-full">
-                                    <input 
-                                        value={editName}
-                                        onChange={(e) => setEditName(e.target.value)}
-                                        className="flex-1 bg-gray-50 border rounded px-3 py-2 text-lg font-bold"
-                                        placeholder="ルーム名を入力"
-                                        autoFocus
-                                    />
-                                    <button onClick={handleSaveName} className="p-2 bg-green-100 text-green-700 rounded hover:bg-green-200"><Save className="w-5 h-5"/></button>
-                                    <button onClick={() => setIsEditing(false)} className="p-2 bg-gray-100 text-gray-500 rounded hover:bg-gray-200"><X className="w-5 h-5"/></button>
+                                <div className="flex gap-1 w-full max-w-xs">
+                                    <input value={editName} onChange={e=>setEditName(e.target.value)} className="flex-1 border rounded px-2 py-1 text-sm font-bold" autoFocus />
+                                    <button onClick={()=>{onUpdateRoomName(editName); setIsEditing(false)}} className="bg-green-100 text-green-700 p-1 rounded"><Save className="w-4 h-4"/></button>
                                 </div>
                             ) : (
-                                <div className="flex items-center gap-3 w-full">
-                                    <h2 className="text-xl md:text-2xl font-bold text-gray-800 truncate">{roomName || '名称未設定'}</h2>
-                                    <button 
-                                        onClick={() => setIsEditing(true)} 
-                                        className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
-                                        title="ルーム名を編集"
-                                    >
-                                        <Pencil className="w-4 h-4" />
-                                    </button>
+                                <div className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 px-2 py-1 rounded" onClick={()=>setIsEditing(true)}>
+                                    <h2 className="text-lg font-bold truncate max-w-[200px]">{roomName || '名称未設定'}</h2>
+                                    <Pencil className="w-3 h-3 text-gray-400"/>
                                 </div>
                             )}
+                            <span className="text-xs bg-gray-100 px-2 py-1 rounded text-gray-500 font-bold">{participants.length}名</span>
                         </div>
-
-                        {/* 下段：ツールバー */}
-                        <div className="flex flex-col md:flex-row justify-between items-center gap-4">
-                            <div className="flex items-center gap-4 w-full md:w-auto">
-                                <span className="font-medium flex items-center gap-2 text-gray-600">
-                                    <Users className="w-5 h-5" />
-                                    参加人数: <span className="text-indigo-600 font-bold text-lg">{participants.length}</span>名
-                                </span>
-                            </div>
-                            <button onClick={copyLink} className="bg-gray-100 px-4 py-2 rounded-lg text-sm hover:bg-gray-200 transition-colors w-full md:w-auto text-center flex items-center justify-center gap-2">
-                                {copied ? <Check className="w-4 h-4"/> : <Copy className="w-4 h-4"/>}
-                                {copied ? 'コピー完了' : '招待リンクをコピー'}
+                        
+                        <div className="flex gap-2">
+                            <button onClick={()=>setSortMode(s => s === 'join' ? 'name' : 'join')} className="flex items-center gap-1 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-xs rounded font-bold transition">
+                                <ArrowUpDown className="w-3 h-3"/> {sortMode === 'join' ? '入室順' : '氏名順'}
+                            </button>
+                            <button onClick={handleExport} className="flex items-center gap-1 px-3 py-1.5 bg-green-50 hover:bg-green-100 text-green-700 text-xs rounded font-bold transition">
+                                <Download className="w-3 h-3"/> ログ保存
                             </button>
                         </div>
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                        {Object.entries(studentThreads).map(([sid, msgs]) => (
-                            <ChatCard key={sid} studentId={sid} studentName={participants.find(p => p.id === sid)?.name || '不明'} messages={msgs} onSendMessage={onSendMessage} />
-                        ))}
-                    </div>
-                </div>
-            );
-        }
-
-        function ChatCard({ studentId, studentName, messages, onSendMessage }) {
-            const [input, setInput] = useState('');
-            const scrollRef = useRef(null);
-            useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }, [messages]);
-            const hasUnread = messages.length > 0 && messages[messages.length-1].senderType === 'student';
-
-            return (
-                <div className={`bg-white rounded-xl shadow-sm border h-[350px] flex flex-col ${hasUnread ? 'border-indigo-400 ring-1 ring-indigo-400' : ''}`}>
-                    <div className="bg-gray-50 px-4 py-3 border-b font-bold text-sm text-gray-700 truncate">{studentName}</div>
-                    <div ref={scrollRef} className="flex-1 overflow-y-auto p-3 space-y-2 bg-white">
-                        {messages.map(msg => (
-                            <div key={msg.id} className={`flex ${msg.senderType === 'teacher' ? 'justify-end' : 'justify-start'}`}>
-                                <div className={`max-w-[90%] rounded-lg px-3 py-2 text-xs break-words ${msg.senderType === 'teacher' ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-800'}`}>{msg.text}</div>
-                            </div>
-                        ))}
-                    </div>
-                    <form onSubmit={(e) => { e.preventDefault(); if(input.trim()){ onSendMessage(input, studentId, studentName, 'teacher'); setInput(''); }}} className="p-2 border-t">
-                        <div className="flex gap-2"><input value={input} onChange={e=>setInput(e.target.value)} className="flex-1 border rounded px-2 py-1 text-sm" placeholder="返信..." /><button type="submit" className="text-indigo-600"><Send className="w-4 h-4" /></button></div>
-                    </form>
-                </div>
-            );
-        }
-
-        function StudentDashboard({ currentUserId, roomName, messages, onSendMessage }) {
-            const [input, setInput] = useState('');
-            const scrollRef = useRef(null);
-            const myMessages = messages.filter(m => m.studentId === currentUserId);
-            useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }, [myMessages]);
-
-            return (
-                <div className="max-w-2xl mx-auto h-[calc(100vh-120px)] bg-white rounded-2xl shadow-xl flex flex-col overflow-hidden border">
-                    <div className="bg-indigo-50 p-4 border-b border-indigo-100">
-                        <div className="text-center">
-                            {roomName && <div className="text-indigo-900 font-bold mb-1">{roomName}</div>}
-                            <p className="text-sm text-indigo-800 font-medium">先生に質問を送る</p>
-                            <p className="text-xs text-indigo-600 opacity-70">他の生徒には見えません</p>
+                    {/* Compact Grid */}
+                    <div className="flex-1 overflow-y-auto pr-1">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3 pb-10">
+                            {studentThreads.map(({ participant, messages }) => (
+                                <CompactChatCard 
+                                    key={participant.id} 
+                                    participant={participant} 
+                                    messages={messages} 
+                                    onSendMessage={onSendMessage}
+                                    onDeleteMessage={onDeleteMessage}
+                                />
+                            ))}
                         </div>
                     </div>
-                    <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4">
+                </div>
+            );
+        }
+
+        // --- Compact Chat Card (Teacher) ---
+        function CompactChatCard({ participant, messages, onSendMessage, onDeleteMessage }) {
+            const [input, setInput] = useState('');
+            const scrollRef = useRef(null);
+
+            useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }, [messages]);
+
+            const lastMsg = messages[messages.length - 1];
+            // 未読強調: 最後が「生徒」かつ「削除されていない」
+            const isUnread = lastMsg && lastMsg.senderType === 'student' && !lastMsg.deleted;
+            // 挙手状態
+            const isHandRaised = participant.handRaised;
+
+            const sendQuick = (text) => onSendMessage(text, participant.id, participant.name, 'teacher');
+
+            return (
+                <div className={`
+                    bg-white rounded-lg border shadow-sm flex flex-col h-[320px] overflow-hidden transition-all relative
+                    ${isHandRaised ? 'bg-red-50 border-red-300 ring-2 ring-red-200' : ''}
+                    ${isUnread && !isHandRaised ? 'border-orange-400 ring-2 ring-orange-100' : 'border-gray-200'}
+                `}>
+                    {/* Header */}
+                    <div className={`px-3 py-2 border-b flex justify-between items-center ${isHandRaised ? 'bg-red-100' : 'bg-gray-50'}`}>
+                        <div className="truncate font-bold text-sm flex-1" title={participant.name}>{participant.name}</div>
+                        <div className="flex gap-1">
+                            {participant.vote === 'O' && <div className="text-green-600 bg-white rounded-full p-0.5"><Circle className="w-4 h-4"/></div>}
+                            {participant.vote === 'X' && <div className="text-red-600 bg-white rounded-full p-0.5"><X className="w-4 h-4"/></div>}
+                            {isHandRaised && <Hand className="w-4 h-4 text-red-500 animate-bounce"/>}
+                        </div>
+                    </div>
+
+                    {/* Messages */}
+                    <div ref={scrollRef} className="flex-1 overflow-y-auto p-2 space-y-2 bg-white/50 text-xs">
+                        {messages.length === 0 && <div className="text-center text-gray-300 mt-4">- No Data -</div>}
+                        {messages.map(msg => {
+                            const isTeacher = msg.senderType === 'teacher';
+                            return (
+                                <div key={msg.id} className={`flex ${isTeacher ? 'justify-end' : 'justify-start'}`}>
+                                    <div className={`max-w-[90%] rounded px-2 py-1.5 break-words group relative ${
+                                        msg.deleted ? 'bg-gray-100 text-gray-400 italic border' : 
+                                        isTeacher ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-800'
+                                    }`}>
+                                        {msg.text}
+                                        <div className={`text-[9px] mt-0.5 text-right opacity-70 ${isTeacher ? 'text-indigo-100' : 'text-gray-400'}`}>
+                                            {formatTime(msg.timestamp)}
+                                        </div>
+                                        {!msg.deleted && isTeacher && (
+                                            <button onClick={()=>onDeleteMessage(msg.id)} className="absolute -left-4 top-0 text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100">
+                                                <Trash2 className="w-3 h-3"/>
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+
+                    {/* Quick Actions & Input */}
+                    <div className="p-2 border-t bg-gray-50 space-y-2">
+                        <div className="flex justify-between gap-1">
+                            <button onClick={()=>sendQuick("具体的に教えて🙇")} className="flex-1 bg-white border border-gray-200 text-[10px] py-1 rounded hover:bg-gray-100">具体的に?</button>
+                            <button onClick={()=>sendQuick("了解しました🫡")} className="flex-1 bg-white border border-gray-200 text-[10px] py-1 rounded hover:bg-gray-100">了解🫡</button>
+                            <button onClick={()=>sendQuick("素晴らしい！👍")} className="flex-1 bg-white border border-gray-200 text-[10px] py-1 rounded hover:bg-gray-100">👍</button>
+                        </div>
+                        <form onSubmit={(e)=>{e.preventDefault(); if(input.trim()){ onSendMessage(input, participant.id, participant.name, 'teacher'); setInput('');}}} className="flex gap-1">
+                            <input value={input} onChange={e=>setInput(e.target.value)} className="flex-1 border rounded px-2 py-1 text-xs" placeholder="入力..." />
+                            <button type="submit" className="bg-indigo-600 text-white px-2 rounded"><Send className="w-3 h-3"/></button>
+                        </form>
+                    </div>
+                </div>
+            );
+        }
+
+        // --- Student Dashboard ---
+        function StudentDashboard({ user, roomName, messages, onSendMessage, onDeleteMessage, onUpdateStatus, participants }) {
+            const [input, setInput] = useState('');
+            const scrollRef = useRef(null);
+            
+            // 自分のステータス取得
+            const myStatus = participants.find(p => p.id === user.uid) || {};
+            const myMessages = messages.filter(m => m.studentId === user.uid);
+
+            useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }, [myMessages]);
+
+            const toggleHand = () => onUpdateStatus(user.uid, { handRaised: !myStatus.handRaised });
+            const castVote = (val) => onUpdateStatus(user.uid, { vote: myStatus.vote === val ? null : val });
+
+            return (
+                <div className="max-w-xl mx-auto h-[calc(100vh-80px)] bg-white rounded-xl shadow-lg flex flex-col border overflow-hidden">
+                    {/* Status Bar */}
+                    <div className="bg-indigo-50 p-2 flex justify-around items-center border-b border-indigo-100">
+                        <button onClick={toggleHand} className={`flex flex-col items-center gap-1 p-2 rounded-lg w-20 transition-all ${myStatus.handRaised ? 'bg-red-500 text-white shadow-md scale-105' : 'bg-white text-gray-600 border'}`}>
+                            <Hand className="w-5 h-5"/> <span className="text-[10px] font-bold">挙手</span>
+                        </button>
+                        <div className="h-8 w-px bg-indigo-200 mx-2"></div>
+                        <div className="flex gap-2">
+                             <button onClick={()=>castVote('O')} className={`flex flex-col items-center gap-1 p-2 rounded-lg w-16 transition-all ${myStatus.vote === 'O' ? 'bg-green-500 text-white shadow-md' : 'bg-white text-gray-600 border'}`}>
+                                <Circle className="w-5 h-5"/> <span className="text-[10px] font-bold">まる</span>
+                            </button>
+                            <button onClick={()=>castVote('X')} className={`flex flex-col items-center gap-1 p-2 rounded-lg w-16 transition-all ${myStatus.vote === 'X' ? 'bg-red-500 text-white shadow-md' : 'bg-white text-gray-600 border'}`}>
+                                <X className="w-5 h-5"/> <span className="text-[10px] font-bold">ばつ</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Messages */}
+                    <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50">
+                        {myMessages.length === 0 && <div className="text-center text-gray-400 text-sm mt-10">質問や意見を送ってみましょう</div>}
                         {myMessages.map(msg => (
                             <div key={msg.id} className={`flex ${msg.senderType === 'student' ? 'justify-end' : 'justify-start'}`}>
-                                <div className={`max-w-[80%] rounded-2xl px-4 py-3 text-sm break-words ${msg.senderType === 'student' ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-800'}`}>{msg.text}</div>
+                                <div className={`max-w-[85%] rounded-xl px-4 py-2 text-sm break-words relative group ${
+                                    msg.deleted ? 'bg-gray-200 text-gray-500 italic border' :
+                                    msg.senderType === 'student' ? 'bg-indigo-600 text-white' : 'bg-white text-gray-800 border'
+                                }`}>
+                                    {msg.text}
+                                    <div className={`text-[10px] mt-1 text-right opacity-70 ${msg.senderType === 'student' ? 'text-indigo-100' : 'text-gray-400'}`}>
+                                        {formatTime(msg.timestamp)}
+                                    </div>
+                                    {!msg.deleted && msg.senderType === 'student' && (
+                                        <button onClick={()=>onDeleteMessage(msg.id)} className="absolute -left-8 top-1/2 -translate-y-1/2 text-gray-300 hover:text-red-500 p-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                            <Trash2 className="w-4 h-4"/>
+                                        </button>
+                                    )}
+                                </div>
                             </div>
                         ))}
                     </div>
-                    <div className="p-4 border-t"><form onSubmit={(e)=>{e.preventDefault(); if(input.trim()){ onSendMessage(input); setInput(''); }}} className="flex gap-2"><input value={input} onChange={e=>setInput(e.target.value)} className="flex-1 border rounded-xl px-4 py-3" placeholder="メッセージ..." autoFocus /><button type="submit" className="bg-indigo-600 text-white px-6 rounded-xl"><Send className="w-5 h-5" /></button></form></div>
+
+                    {/* Input */}
+                    <div className="p-3 bg-white border-t">
+                        <form onSubmit={(e)=>{e.preventDefault(); if(input.trim()){ onSendMessage(input); setInput(''); }}} className="flex gap-2">
+                            <input value={input} onChange={e=>setInput(e.target.value)} className="flex-1 border rounded-lg px-3 py-2" placeholder="メッセージ..." />
+                            <button type="submit" className="bg-indigo-600 text-white px-4 rounded-lg"><Send className="w-5 h-5"/></button>
+                        </form>
+                    </div>
                 </div>
             );
         }
