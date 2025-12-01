@@ -234,7 +234,7 @@
                             <School className="text-indigo-600 w-5 h-5 md:w-6 md:h-6 flex-shrink-0" />
                             <div className="flex flex-col">
                                 <h1 className="font-bold text-base md:text-lg leading-tight">ClassChat <span className="text-indigo-600">Pro</span></h1>
-                                {user && <span className="text-[10px] text-gray-500 hidden md:block">Login: {user.displayName}</span>}
+                                {user && <span className="text-xs text-gray-500 hidden md:block">ようこそ！{user.displayName}さん</span>}
                             </div>
                         </div>
                         <div className="flex items-center gap-2">
@@ -358,6 +358,7 @@
             const [isEditing, setIsEditing] = useState(false);
             const [editName, setEditName] = useState('');
             const [sortMode, setSortMode] = useState('join'); // 'join' | 'name'
+            const [copied, setCopied] = useState(false);
 
             useEffect(() => { if(isEditing) setEditName(roomName); }, [isEditing, roomName]);
 
@@ -375,6 +376,11 @@
                 link.href = URL.createObjectURL(blob);
                 link.download = `chat_log_${roomId}_${new Date().toISOString().slice(0,10)}.csv`;
                 link.click();
+            };
+
+            const copyLink = () => {
+                const url = `${window.location.origin}${window.location.pathname}?room=${roomId}`;
+                navigator.clipboard.writeText(url).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); }).catch(() => prompt("URL:", url));
             };
 
             // Sorting & Grouping
@@ -414,6 +420,9 @@
                         </div>
                         
                         <div className="flex gap-2">
+                            <button onClick={copyLink} className="flex items-center gap-1 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs rounded font-bold transition">
+                                {copied ? <Check className="w-3 h-3"/> : <Copy className="w-3 h-3"/>} {copied ? 'コピー完了' : '招待リンク'}
+                            </button>
                             <button onClick={()=>setSortMode(s => s === 'join' ? 'name' : 'join')} className="flex items-center gap-1 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-xs rounded font-bold transition">
                                 <ArrowUpDown className="w-3 h-3"/> {sortMode === 'join' ? '入室順' : '氏名順'}
                             </button>
