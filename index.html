@@ -30,8 +30,8 @@
         import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut } from 'firebase/auth';
         // updateDocを追加
         import { getFirestore, collection, addDoc, onSnapshot, query, where, serverTimestamp, doc, setDoc, deleteDoc, getDocs, updateDoc } from 'firebase/firestore';
-        // Pencil, Save, X アイコンを追加
-        import { MessageCircle, Users, Send, LogOut, Copy, Check, User, School, ArrowRight, AlertTriangle, Trash2, Clock, Pencil, Save, X } from 'lucide-react';
+        // LogIn, DoorOpen アイコンを追加
+        import { MessageCircle, Users, Send, LogOut, Copy, Check, User, School, ArrowRight, AlertTriangle, Trash2, Clock, Pencil, Save, X, LogIn, DoorOpen } from 'lucide-react';
 
         // --- あなたのFirebase設定 ---
         const firebaseConfig = {
@@ -172,7 +172,18 @@
                 setMode('teacher');
             };
 
+            // 退室処理（ログイン状態は維持）
+            const handleExitRoom = () => {
+                if (!window.confirm("部屋から退室しますか？")) return;
+                setMode('landing');
+                setRoomId('');
+                setMessages([]);
+                window.history.pushState({}, '', window.location.pathname);
+            };
+
+            // ログアウト処理（完全にサインアウト）
             const handleLogout = async () => {
+                if (!window.confirm("ログアウトしますか？")) return;
                 await signOut(auth);
                 setMode('landing');
                 setRoomId('');
@@ -211,21 +222,58 @@
                                 <School className="text-indigo-600 w-6 h-6 flex-shrink-0" />
                                 <div className="flex flex-col">
                                     <h1 className="font-bold text-lg md:text-xl text-gray-800 leading-tight">ClassChat</h1>
-                                    {mode !== 'landing' && currentRoomName && (
-                                        <span className="text-xs text-gray-500 truncate max-w-[150px] md:max-w-xs">{currentRoomName}</span>
+                                    {/* ようこそメッセージ（ログイン中のみ） */}
+                                    {user && (
+                                        <span className="text-xs text-gray-500 hidden md:block">
+                                            ようこそ！{user.displayName}さん
+                                        </span>
                                     )}
                                 </div>
                             </div>
-                            <div className="flex items-center gap-4">
+                            
+                            <div className="flex items-center gap-2 md:gap-4">
+                                {/* ルーム名表示 (入室中のみ) */}
+                                {mode !== 'landing' && currentRoomName && (
+                                    <span className="text-xs font-bold text-indigo-700 bg-indigo-50 px-2 py-1 rounded hidden lg:block truncate max-w-[150px]">
+                                        {currentRoomName}
+                                    </span>
+                                )}
+
+                                {/* ルームID表示 (入室中のみ) */}
                                 {mode !== 'landing' && (
                                     <div className="bg-indigo-50 px-3 py-1 rounded-lg hidden md:block">
                                         <span className="text-xs text-indigo-500 uppercase font-bold mr-2">Room ID</span>
                                         <span className="font-mono font-bold text-indigo-700 text-lg">{roomId}</span>
                                     </div>
                                 )}
-                                {user && (
-                                    <button onClick={handleLogout} className="text-gray-500 hover:text-red-500 text-sm flex items-center gap-1">
-                                        <LogOut className="w-4 h-4" /> <span className="hidden md:inline">ログアウト</span>
+
+                                {/* 退室ボタン (入室中のみ表示) */}
+                                {mode !== 'landing' && (
+                                    <button 
+                                        onClick={handleExitRoom} 
+                                        className="bg-gray-100 hover:bg-gray-200 text-gray-600 px-3 py-2 rounded-lg text-sm flex items-center gap-1 transition-colors"
+                                        title="退室する（ログインしたままトップへ戻る）"
+                                    >
+                                        <DoorOpen className="w-4 h-4" /> <span className="hidden md:inline">退室</span>
+                                    </button>
+                                )}
+
+                                {/* ログイン/ログアウトボタン */}
+                                {user ? (
+                                    <button 
+                                        onClick={handleLogout} 
+                                        className="text-gray-500 hover:text-red-500 text-sm flex items-center gap-1 px-2 py-1"
+                                        title="ログアウト"
+                                    >
+                                        <LogOut className="w-5 h-5" /> 
+                                        <span className="hidden md:inline">ログアウト</span>
+                                    </button>
+                                ) : (
+                                    <button 
+                                        onClick={handleGoogleLogin} 
+                                        className="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold px-4 py-2 rounded-lg flex items-center gap-1 transition-colors"
+                                    >
+                                        <LogIn className="w-4 h-4" /> ログイン
                                     </button>
                                 )}
                             </div>
@@ -243,6 +291,7 @@
                                 user={user} 
                                 onResumeRoom={resumeRoom}
                                 db={db}
+                                onLogin={handleGoogleLogin}
                             />
                         )}
                         {mode === 'teacher' && (
@@ -269,7 +318,7 @@
         }
 
         // --- サブコンポーネント ---
-        function LandingView({ roomId, setRoomId, studentName, setStudentName, onCreateRoom, onJoinRoom, user, onResumeRoom, db }) {
+        function LandingView({ roomId, setRoomId, studentName, setStudentName, onCreateRoom, onJoinRoom, user, onResumeRoom, db, onLogin }) {
             const [activeTab, setActiveTab] = useState('student');
             const [myRooms, setMyRooms] = useState([]);
             const [loadingRooms, setLoadingRooms] = useState(false);
@@ -335,7 +384,13 @@
                                 <div className="space-y-4">
                                     <h2 className="text-2xl font-bold text-center text-gray-800">授業に参加</h2>
                                     <div className="text-center text-xs text-gray-400 mb-2">
-                                        {user ? `ログイン中: ${user.displayName}` : "Googleアカウントでログインします"}
+                                        {user ? (
+                                            <span className="text-green-600 font-bold flex items-center justify-center gap-1">
+                                                <Check className="w-3 h-3" /> ログイン中: {user.displayName}
+                                            </span>
+                                        ) : (
+                                            "ログインして履歴を残すことができます"
+                                        )}
                                     </div>
                                     <input type="text" value={roomId} onChange={(e) => setRoomId(e.target.value.toUpperCase())} placeholder="部屋ID (例: X7Y2Z9)" className="w-full bg-gray-50 border rounded-lg px-4 py-3 text-lg uppercase font-mono" />
                                     <input type="text" value={studentName} onChange={(e) => setStudentName(e.target.value)} placeholder="表示名 (空欄ならGoogle名)" className="w-full bg-gray-50 border rounded-lg px-4 py-3 text-lg" />
@@ -347,7 +402,9 @@
                                 <div className="space-y-6">
                                     <div className="text-center">
                                         <h2 className="text-2xl font-bold text-gray-800">授業を開始</h2>
-                                        <p className="text-gray-500 text-sm mt-1">Googleアカウントで部屋を作成します</p>
+                                        <p className="text-gray-500 text-sm mt-1">
+                                            {user ? "新しい部屋を作成します" : "Googleアカウントでログインが必要です"}
+                                        </p>
                                     </div>
                                     
                                     <div className="space-y-2">
@@ -366,7 +423,7 @@
                                     </button>
 
                                     {/* 過去の部屋リスト */}
-                                    {user && (
+                                    {user ? (
                                         <div className="mt-6 border-t border-gray-100 pt-4 text-left">
                                             <div className="flex items-center gap-2 text-gray-500 mb-3">
                                                 <Clock className="w-4 h-4" />
@@ -403,6 +460,10 @@
                                                     ))}
                                                 </div>
                                             )}
+                                        </div>
+                                    ) : (
+                                        <div className="mt-4 p-4 bg-gray-50 rounded-lg text-center">
+                                            <p className="text-sm text-gray-500 mb-2">ログインすると過去の履歴を表示できます</p>
                                         </div>
                                     )}
                                 </div>
@@ -480,10 +541,6 @@
                                     <Users className="w-5 h-5" />
                                     参加人数: <span className="text-indigo-600 font-bold text-lg">{participants.length}</span>名
                                 </span>
-                                <div className="bg-indigo-50 px-3 py-1 rounded-lg md:hidden ml-auto">
-                                    <span className="text-xs text-indigo-500 uppercase font-bold mr-2">ID</span>
-                                    <span className="font-mono font-bold text-indigo-700">{roomId}</span>
-                                </div>
                             </div>
                             <button onClick={copyLink} className="bg-gray-100 px-4 py-2 rounded-lg text-sm hover:bg-gray-200 transition-colors w-full md:w-auto text-center flex items-center justify-center gap-2">
                                 {copied ? <Check className="w-4 h-4"/> : <Copy className="w-4 h-4"/>}
