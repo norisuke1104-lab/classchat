@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ClassChat Pro</title>
+    <title>Class Chat (β版)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script type="importmap">
     {
@@ -32,13 +32,13 @@
         import React, { useState, useEffect, useRef, useMemo } from 'react';
         import { createRoot } from 'react-dom/client';
         import { initializeApp } from 'firebase/app';
-        import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut } from 'firebase/auth';
-        import { getFirestore, collection, addDoc, onSnapshot, query, where, serverTimestamp, doc, setDoc, deleteDoc, getDocs, updateDoc } from 'firebase/firestore';
-        // ArrowRightを追加しました
+        // signInAnonymouslyを追加
+        import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut, signInAnonymously } from 'firebase/auth';
+        import { getFirestore, collection, addDoc, onSnapshot, query, where, serverTimestamp, doc, setDoc, deleteDoc, getDocs, updateDoc, getDoc } from 'firebase/firestore';
         import { 
             School, User, LogIn, LogOut, DoorOpen, Copy, Check, 
             MessageCircle, Send, Trash2, Clock, Pencil, Save, X, 
-            Hand, Circle, ArrowUpDown, Download, HelpCircle, ThumbsUp, CheckCircle2, ArrowRight
+            Hand, Circle, ArrowUpDown, Download, HelpCircle, ThumbsUp, CheckCircle2, ArrowRight, UserX
         } from 'lucide-react';
 
         // --- Firebase Config ---
@@ -70,7 +70,6 @@
              return `${date.getFullYear()}/${date.getMonth()+1}/${date.getDate()} ${date.getHours()}:${String(date.getMinutes()).padStart(2, '0')}`;
         };
 
-        // 日付が変わったか判定するヘルパー
         const isSameDay = (t1, t2) => {
             if (!t1 || !t2) return false;
             const d1 = t1.toDate();
@@ -80,7 +79,6 @@
                    d1.getDate() === d2.getDate();
         };
 
-        // 区切り線用の短い日付フォーマット
         const formatDateShort = (timestamp) => {
             if (!timestamp) return '';
             const d = timestamp.toDate();
@@ -164,9 +162,20 @@
                 }
             };
 
-            const createRoom = async (nameInput) => {
-                const currentUser = user || await handleGoogleLogin();
+            const handleGuestLogin = async () => {
+                try {
+                    const result = await signInAnonymously(auth);
+                    return result.user;
+                } catch (error) {
+                    alert("ゲスト入室エラー: " + error.message);
+                    return null;
+                }
+            };
+
+            const createRoom = async (nameInput, userOverride) => {
+                const currentUser = userOverride || user || await handleGoogleLogin();
                 if (!currentUser) return;
+                
                 const newRoomId = Math.random().toString(36).substring(2, 8).toUpperCase();
                 setRoomId(newRoomId);
                 setMode('teacher');
@@ -177,17 +186,19 @@
                 });
             };
 
-            const joinRoom = async () => {
+            const joinRoom = async (userOverride) => {
                 if (!roomId) return;
-                const currentUser = user || await handleGoogleLogin();
+                // 引数でユーザーが渡されればそれを使い、なければ現在のstateを使う（自動ログインはしない）
+                const currentUser = userOverride || user;
                 if (!currentUser) return;
+
                 const finalName = studentName.trim() || currentUser.displayName || "名無し";
                 await setDoc(doc(db, 'classroom_participants', currentUser.uid), {
                     roomId: roomId,
                     name: finalName,
                     joinedAt: serverTimestamp(),
-                    handRaised: false, // 初期状態
-                    vote: null         // 初期状態
+                    handRaised: false,
+                    vote: null
                 });
                 setMode('student');
             };
@@ -196,6 +207,13 @@
 
             const handleExit = () => {
                 if(!confirm("退室しますか？")) return;
+                setMode('landing');
+                setRoomId('');
+                setMessages([]);
+                window.history.pushState({}, '', window.location.pathname);
+            };
+
+            const forceExit = () => {
                 setMode('landing');
                 setRoomId('');
                 setMessages([]);
@@ -223,7 +241,6 @@
                 });
             };
 
-            // メッセージ削除（論理削除）
             const deleteMessage = async (msgId) => {
                 if(!confirm("このメッセージを削除しますか？")) return;
                 await updateDoc(doc(db, 'classroom_messages', msgId), {
@@ -237,7 +254,6 @@
                 await updateDoc(doc(db, 'classroom_rooms', roomId), { name: newName });
             };
 
-            // 生徒リアクション更新
             const updateParticipantStatus = async (uid, data) => {
                 await updateDoc(doc(db, 'classroom_participants', uid), data);
             };
@@ -250,8 +266,8 @@
                         <div className="flex items-center gap-2 overflow-hidden">
                             <School className="text-indigo-600 w-5 h-5 md:w-6 md:h-6 flex-shrink-0" />
                             <div className="flex flex-col">
-                                <h1 className="font-bold text-base md:text-lg leading-tight">ClassChat <span className="text-indigo-600">Pro</span></h1>
-                                {user && <span className="text-xs text-gray-500 hidden md:block">ようこそ！{user.displayName}さん</span>}
+                                <h1 className="font-bold text-base md:text-lg leading-tight">Class Chat <span className="text-indigo-600 text-xs font-normal align-middle">(β版)</span></h1>
+                                {user && <span className="text-xs text-gray-500 hidden md:block">ようこそ！{user.isAnonymous ? 'ゲスト' : user.displayName}さん</span>}
                             </div>
                         </div>
                         <div className="flex items-center gap-2">
@@ -278,14 +294,18 @@
                         {mode === 'landing' && (
                             <LandingView 
                                 roomId={roomId} setRoomId={setRoomId} studentName={studentName} setStudentName={setStudentName}
-                                onCreateRoom={createRoom} onJoinRoom={joinRoom} user={user} onResumeRoom={resumeRoom} db={db}
+                                onCreateRoom={createRoom} onJoinRoom={joinRoom} 
+                                onLogin={handleGoogleLogin} onLoginGuest={handleGuestLogin}
+                                user={user} onResumeRoom={resumeRoom} db={db}
                             />
                         )}
                         {mode === 'teacher' && (
                             <TeacherDashboard 
+                                user={user} db={db}
                                 roomId={roomId} roomName={currentRoomName} onUpdateRoomName={updateRoomName}
                                 participants={participants} messages={messages} onSendMessage={sendMessage}
                                 onDeleteMessage={deleteMessage}
+                                onForceExit={forceExit}
                             />
                         )}
                         {mode === 'student' && user && (
@@ -293,7 +313,6 @@
                                 user={user} roomName={currentRoomName}
                                 messages={messages} 
                                 onSendMessage={(text) => {
-                                    // 修正: 送信ボタンが押されたとき、参加者リストから自分の最新の名前を取得して送信する
                                     const myInfo = participants.find(p => p.id === user.uid);
                                     const name = myInfo ? myInfo.name : (user.displayName || '名無し');
                                     sendMessage(text, user.uid, name, 'student');
@@ -308,13 +327,13 @@
         }
 
         // --- Landing View ---
-        function LandingView({ roomId, setRoomId, studentName, setStudentName, onCreateRoom, onJoinRoom, user, onResumeRoom, db }) {
+        function LandingView({ roomId, setRoomId, studentName, setStudentName, onCreateRoom, onJoinRoom, onLogin, onLoginGuest, user, onResumeRoom, db }) {
             const [activeTab, setActiveTab] = useState('student');
             const [myRooms, setMyRooms] = useState([]);
             const [newRoomName, setNewRoomName] = useState('');
 
             useEffect(() => {
-                if (activeTab === 'teacher' && user) {
+                if (activeTab === 'teacher' && user && !user.isAnonymous) {
                     const q = query(collection(db, 'classroom_rooms'), where('teacherId', '==', user.uid));
                     getDocs(q).then(snap => {
                         const rooms = [];
@@ -332,6 +351,20 @@
                 setMyRooms(prev => prev.filter(r => r.id !== rid));
             };
 
+            const handleStudentJoin = async (method) => {
+                if (!roomId) return;
+                let targetUser = user;
+                
+                if (!targetUser) {
+                    if (method === 'google') targetUser = await onLogin();
+                    if (method === 'guest') targetUser = await onLoginGuest();
+                }
+                
+                if (targetUser) {
+                    onJoinRoom(targetUser);
+                }
+            };
+
             return (
                 <div className="flex flex-col items-center pt-8 px-4">
                     <div className="w-full max-w-md bg-white rounded-xl shadow-lg overflow-hidden">
@@ -345,7 +378,31 @@
                                     <h2 className="text-lg font-bold text-center">授業に参加</h2>
                                     <input value={roomId} onChange={e=>setRoomId(e.target.value.toUpperCase())} placeholder="部屋ID (例: X7Y2Z9)" className="w-full bg-gray-50 border rounded-lg px-4 py-3 uppercase font-mono" />
                                     <input value={studentName} onChange={e=>setStudentName(e.target.value)} placeholder="表示名 (空欄ならGoogle名)" className="w-full bg-gray-50 border rounded-lg px-4 py-3" />
-                                    <button onClick={onJoinRoom} disabled={!roomId} className="w-full bg-indigo-600 text-white font-bold py-3 rounded-lg hover:bg-indigo-700 flex items-center justify-center gap-2">{user ? "入室" : "Googleで入室"} <ArrowRight className="w-4 h-4"/></button>
+                                    
+                                    <div className="space-y-3 pt-2">
+                                        {/* メイン: Googleログイン */}
+                                        <button 
+                                            onClick={() => handleStudentJoin('google')} 
+                                            disabled={!roomId} 
+                                            className="w-full bg-indigo-600 text-white font-bold py-3 rounded-lg hover:bg-indigo-700 flex items-center justify-center gap-2 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+                                        >
+                                            {user ? "入室する" : "Googleでログインして入室"} <ArrowRight className="w-4 h-4"/>
+                                        </button>
+
+                                        {/* サブ: ゲストログイン（未ログイン時のみ表示） */}
+                                        {!user && (
+                                            <div className="text-center">
+                                                <button 
+                                                    onClick={() => handleStudentJoin('guest')} 
+                                                    disabled={!roomId}
+                                                    className="text-sm text-gray-500 underline hover:text-indigo-600 disabled:text-gray-300"
+                                                >
+                                                    ログインせずに入室
+                                                </button>
+                                                <p className="text-[10px] text-gray-400 mt-1">※履歴は参照できません</p>
+                                            </div>
+                                        )}
+                                    </div>
                                 </>
                             ) : (
                                 <>
@@ -378,7 +435,7 @@
         }
 
         // --- Teacher Dashboard ---
-        function TeacherDashboard({ roomId, roomName, onUpdateRoomName, participants, messages, onSendMessage, onDeleteMessage }) {
+        function TeacherDashboard({ user, db, roomId, roomName, onUpdateRoomName, participants, messages, onSendMessage, onDeleteMessage, onForceExit }) {
             const [isEditing, setIsEditing] = useState(false);
             const [editName, setEditName] = useState('');
             const [sortMode, setSortMode] = useState('join'); // 'join' | 'name'
@@ -386,12 +443,31 @@
 
             useEffect(() => { if(isEditing) setEditName(roomName); }, [isEditing, roomName]);
 
-            // CSV Export
+            // セキュリティチェック
+            useEffect(() => {
+                const checkOwnership = async () => {
+                    if (!user || !roomId) return;
+                    try {
+                        const roomDoc = await getDoc(doc(db, 'classroom_rooms', roomId));
+                        if (roomDoc.exists()) {
+                            const data = roomDoc.data();
+                            if (data.teacherId !== user.uid) {
+                                alert("【セキュリティ警告】\nあなたはこの部屋の作成者ではありません。\n教師用画面を表示する権限がないため、退出します。");
+                                onForceExit();
+                            }
+                        }
+                    } catch (error) {
+                        console.error("Auth check failed:", error);
+                    }
+                };
+                checkOwnership();
+            }, [roomId, user, db]);
+
             const handleExport = () => {
                 const header = "日時,送信者ID,送信者名,種別,メッセージ\n";
                 const rows = messages.map(m => {
                     const time = formatDateFull(m.timestamp);
-                    const text = m.text.replace(/"/g, '""'); // CSV escape
+                    const text = m.text.replace(/"/g, '""'); 
                     return `"${time}","${m.studentId}","${m.studentName}","${m.senderType}","${text}"`;
                 }).join("\n");
                 
@@ -407,15 +483,12 @@
                 navigator.clipboard.writeText(url).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); }).catch(() => prompt("URL:", url));
             };
 
-            // Sorting & Grouping
             const studentThreads = useMemo(() => {
-                // 生徒リストを並べ替え
                 const sortedParticipants = [...participants].sort((a, b) => {
                     if (sortMode === 'name') return a.name.localeCompare(b.name, 'ja');
                     return (a.joinedAt?.toMillis() || 0) - (b.joinedAt?.toMillis() || 0);
                 });
 
-                // メッセージのマッピング
                 const threads = [];
                 sortedParticipants.forEach(p => {
                     const msgs = messages.filter(m => m.studentId === p.id);
@@ -426,7 +499,6 @@
 
             return (
                 <div className="space-y-4 h-[calc(100vh-80px)] flex flex-col">
-                    {/* Toolbar */}
                     <div className="bg-white p-3 rounded-xl shadow-sm border flex flex-wrap gap-3 items-center justify-between flex-shrink-0">
                         <div className="flex items-center gap-2 flex-1 min-w-[200px]">
                             {isEditing ? (
@@ -456,7 +528,6 @@
                         </div>
                     </div>
 
-                    {/* Compact Grid */}
                     <div className="flex-1 overflow-y-auto pr-1">
                         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3 pb-10">
                             {studentThreads.map(({ participant, messages }) => (
@@ -482,9 +553,7 @@
             useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }, [messages]);
 
             const lastMsg = messages[messages.length - 1];
-            // 未読強調: 最後が「生徒」かつ「削除されていない」
             const isUnread = lastMsg && lastMsg.senderType === 'student' && !lastMsg.deleted;
-            // 挙手状態
             const isHandRaised = participant.handRaised;
 
             const sendQuick = (text) => onSendMessage(text, participant.id, participant.name, 'teacher');
@@ -495,7 +564,6 @@
                     ${isHandRaised ? 'bg-red-50 border-red-300 ring-2 ring-red-200' : ''}
                     ${isUnread && !isHandRaised ? 'border-orange-400 ring-2 ring-orange-100' : 'border-gray-200'}
                 `}>
-                    {/* Header */}
                     <div className={`px-3 py-2 border-b flex justify-between items-center ${isHandRaised ? 'bg-red-100' : 'bg-gray-50'}`}>
                         <div className="truncate font-bold text-sm flex-1" title={participant.name}>{participant.name}</div>
                         <div className="flex gap-1">
@@ -505,7 +573,6 @@
                         </div>
                     </div>
 
-                    {/* Messages */}
                     <div ref={scrollRef} className="flex-1 overflow-y-auto p-2 space-y-2 bg-white/50 text-xs">
                         {messages.length === 0 && <div className="text-center text-gray-300 mt-4">- No Data -</div>}
                         {messages.map((msg, index) => {
@@ -541,7 +608,6 @@
                         })}
                     </div>
 
-                    {/* Quick Actions & Input */}
                     <div className="p-2 border-t bg-gray-50 space-y-2">
                         <div className="flex justify-between gap-1">
                             <button onClick={()=>sendQuick("具体的に教えて🙇")} className="flex-1 bg-white border border-gray-200 text-[10px] py-1 rounded hover:bg-gray-100">具体的に?</button>
@@ -562,7 +628,6 @@
             const [input, setInput] = useState('');
             const scrollRef = useRef(null);
             
-            // 自分のステータス取得
             const myStatus = participants.find(p => p.id === user.uid) || {};
             const myMessages = messages.filter(m => m.studentId === user.uid);
 
@@ -573,7 +638,6 @@
 
             return (
                 <div className="max-w-xl mx-auto h-[calc(100vh-80px)] bg-white rounded-xl shadow-lg flex flex-col border overflow-hidden">
-                    {/* Status Bar */}
                     <div className="bg-indigo-50 p-2 flex justify-around items-center border-b border-indigo-100">
                         <button onClick={toggleHand} className={`flex flex-col items-center gap-1 p-2 rounded-lg w-20 transition-all ${myStatus.handRaised ? 'bg-red-500 text-white shadow-md scale-105' : 'bg-white text-gray-600 border'}`}>
                             <Hand className="w-5 h-5"/> <span className="text-[10px] font-bold">挙手</span>
@@ -589,7 +653,6 @@
                         </div>
                     </div>
 
-                    {/* Messages */}
                     <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50">
                         {myMessages.length === 0 && <div className="text-center text-gray-400 text-sm mt-10">質問や意見を送ってみましょう</div>}
                         {myMessages.map((msg, index) => {
@@ -624,7 +687,6 @@
                         })}
                     </div>
 
-                    {/* Input */}
                     <div className="p-3 bg-white border-t">
                         <form onSubmit={(e)=>{e.preventDefault(); if(input.trim()){ onSendMessage(input); setInput(''); }}} className="flex gap-2">
                             <input value={input} onChange={e=>setInput(e.target.value)} className="flex-1 border rounded-lg px-3 py-2" placeholder="メッセージ..." />
