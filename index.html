@@ -22,6 +22,31 @@
         .scrollbar-thin::-webkit-scrollbar { width: 6px; }
         .scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
         .scrollbar-thin::-webkit-scrollbar-thumb { background-color: #cbd5e1; border-radius: 20px; }
+        /* スライダーのカスタムスタイル */
+        input[type=range] {
+            -webkit-appearance: none;
+            background: transparent;
+        }
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            height: 16px;
+            width: 16px;
+            border-radius: 50%;
+            background: #4f46e5;
+            cursor: pointer;
+            margin-top: -6px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+        }
+        input[type=range]::-webkit-slider-runnable-track {
+            width: 100%;
+            height: 4px;
+            cursor: pointer;
+            background: #cbd5e1;
+            border-radius: 2px;
+        }
+        input[type=range]:focus {
+            outline: none;
+        }
     </style>
 </head>
 <body class="bg-gray-100 text-gray-800">
@@ -32,12 +57,12 @@
         import { createRoot } from 'react-dom/client';
         import { initializeApp } from 'firebase/app';
         import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut, signInAnonymously } from 'firebase/auth';
-        // writeBatchを追加
         import { getFirestore, collection, addDoc, onSnapshot, query, where, serverTimestamp, doc, setDoc, deleteDoc, getDocs, updateDoc, getDoc, writeBatch } from 'firebase/firestore';
+        // LayoutGridを追加
         import { 
             School, User, LogIn, LogOut, DoorOpen, Copy, Check, 
             MessageCircle, Send, Trash2, Clock, Pencil, Save, X, 
-            Hand, Circle, ArrowUpDown, Download, HelpCircle, ThumbsUp, CheckCircle2, ArrowRight, Megaphone, Eye
+            Hand, Circle, ArrowUpDown, Download, HelpCircle, ThumbsUp, CheckCircle2, ArrowRight, Megaphone, Eye, LayoutGrid
         } from 'lucide-react';
 
         // --- Firebase Config ---
@@ -230,13 +255,13 @@
                 if (!text.trim()) return;
                 await addDoc(collection(db, 'classroom_messages'), {
                     roomId,
-                    studentId: targetStudentId, // 'ALL' for broadcast
+                    studentId: targetStudentId,
                     studentName: targetStudentName,
                     text: text,
                     senderType,
                     timestamp: serverTimestamp(),
                     deleted: false,
-                    read: false // 既読フラグ初期値
+                    read: false
                 });
             };
 
@@ -257,7 +282,6 @@
                 await updateDoc(doc(db, 'classroom_participants', uid), data);
             };
 
-            // 全員の手を下げる
             const lowerAllHands = async () => {
                 if(!confirm("全員の手を下げさせますか？")) return;
                 const batch = writeBatch(db);
@@ -270,7 +294,6 @@
                 await batch.commit();
             };
 
-            // 既読をつける処理
             const markAsRead = async (messageId) => {
                 try {
                     await updateDoc(doc(db, 'classroom_messages', messageId), { read: true });
@@ -347,9 +370,7 @@
             );
         }
 
-        // --- Landing View ---
         function LandingView({ roomId, setRoomId, studentName, setStudentName, onCreateRoom, onJoinRoom, onLogin, onLoginGuest, user, onResumeRoom, db }) {
-            // (省略なし、前回と同じ)
             const [activeTab, setActiveTab] = useState('student');
             const [myRooms, setMyRooms] = useState([]);
             const [newRoomName, setNewRoomName] = useState('');
@@ -431,6 +452,8 @@
             const [sortMode, setSortMode] = useState('join');
             const [copied, setCopied] = useState(false);
             const [broadcastText, setBroadcastText] = useState('');
+            // グリッド列数のステート (初期値 4)
+            const [gridCols, setGridCols] = useState(4);
 
             useEffect(() => { if(isEditing) setEditName(roomName); }, [isEditing, roomName]);
 
@@ -479,11 +502,9 @@
                     return (a.joinedAt?.toMillis() || 0) - (b.joinedAt?.toMillis() || 0);
                 });
                 
-                // ブロードキャストメッセージ
                 const broadcasts = messages.filter(m => m.studentId === 'ALL');
 
                 return sortedParticipants.map(p => {
-                    // 生徒個別のメッセージ + ブロードキャストをマージして時系列ソート
                     const personalMsgs = messages.filter(m => m.studentId === p.id);
                     const allMsgs = [...personalMsgs, ...broadcasts].sort((a, b) => 
                         (a.timestamp?.toMillis() || 0) - (b.timestamp?.toMillis() || 0)
@@ -494,9 +515,9 @@
 
             return (
                 <div className="space-y-4 h-[calc(100vh-80px)] flex flex-col">
-                    <div className="bg-white p-3 rounded-xl shadow-sm border flex flex-wrap gap-3 items-center justify-between flex-shrink-0">
-                        {/* 左: 名前編集 & 全員送信 */}
-                        <div className="flex flex-col md:flex-row gap-3 flex-1">
+                    <div className="bg-white p-3 rounded-xl shadow-sm border flex flex-col gap-3 flex-shrink-0">
+                        {/* 上段: 名前編集 & 全員送信 */}
+                        <div className="flex flex-col md:flex-row gap-3 items-center justify-between">
                             <div className="flex items-center gap-2">
                                 {isEditing ? (
                                     <div className="flex gap-1">
@@ -512,33 +533,51 @@
                                 <span className="text-xs bg-gray-100 px-2 py-1 rounded text-gray-500 font-bold">{participants.length}名</span>
                             </div>
 
-                            {/* 一斉送信 */}
-                            <div className="flex items-center gap-2 flex-1 max-w-md">
+                            <div className="flex items-center gap-2 flex-1 max-w-md w-full">
                                 <Megaphone className="w-4 h-4 text-indigo-500" />
                                 <input value={broadcastText} onChange={e=>setBroadcastText(e.target.value)} className="flex-1 border rounded px-2 py-1 text-sm" placeholder="全員に送信..." />
                                 <button onClick={sendBroadcast} className="bg-indigo-600 text-white px-3 py-1 rounded text-sm hover:bg-indigo-700"><Send className="w-3 h-3"/></button>
                             </div>
                         </div>
                         
-                        {/* 右: アクション */}
-                        <div className="flex gap-2 items-center">
-                            <button onClick={onLowerAllHands} className="flex items-center gap-1 px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 text-xs rounded font-bold transition" title="全員の手を下げる">
-                                <Hand className="w-3 h-3"/> 全下げ
-                            </button>
-                            <button onClick={copyLink} className="hidden sm:flex items-center gap-1 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs rounded font-bold transition">
-                                {copied ? <Check className="w-3 h-3"/> : <Copy className="w-3 h-3"/>}
-                            </button>
-                            <button onClick={()=>setSortMode(s => s === 'join' ? 'name' : 'join')} className="flex items-center gap-1 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-xs rounded font-bold transition">
-                                <ArrowUpDown className="w-3 h-3"/> {sortMode === 'join' ? '入室' : '氏名'}
-                            </button>
-                            <button onClick={handleExport} className="hidden sm:flex items-center gap-1 px-3 py-1.5 bg-green-50 hover:bg-green-100 text-green-700 text-xs rounded font-bold transition">
-                                <Download className="w-3 h-3"/>
-                            </button>
+                        {/* 下段: アクション & スライダー */}
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                            {/* 列数スライダー */}
+                            <div className="flex items-center gap-2 bg-gray-50 px-3 py-1.5 rounded border border-gray-200">
+                                <LayoutGrid className="w-4 h-4 text-gray-500" />
+                                <input 
+                                    type="range" 
+                                    min="1" 
+                                    max="6" 
+                                    value={gridCols} 
+                                    onChange={(e) => setGridCols(Number(e.target.value))}
+                                    className="w-24 h-1.5 bg-gray-300 rounded-lg appearance-none cursor-pointer"
+                                />
+                                <span className="text-xs font-bold text-gray-500 w-3 text-center">{gridCols}</span>
+                            </div>
+
+                            <div className="flex gap-2">
+                                <button onClick={onLowerAllHands} className="flex items-center gap-1 px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 text-xs rounded font-bold transition" title="全員の手を下げる">
+                                    <Hand className="w-3 h-3"/> 全下げ
+                                </button>
+                                <button onClick={copyLink} className="hidden sm:flex items-center gap-1 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs rounded font-bold transition">
+                                    {copied ? <Check className="w-3 h-3"/> : <Copy className="w-3 h-3"/>}
+                                </button>
+                                <button onClick={()=>setSortMode(s => s === 'join' ? 'name' : 'join')} className="flex items-center gap-1 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-xs rounded font-bold transition">
+                                    <ArrowUpDown className="w-3 h-3"/> {sortMode === 'join' ? '入室' : '氏名'}
+                                </button>
+                                <button onClick={handleExport} className="hidden sm:flex items-center gap-1 px-3 py-1.5 bg-green-50 hover:bg-green-100 text-green-700 text-xs rounded font-bold transition">
+                                    <Download className="w-3 h-3"/>
+                                </button>
+                            </div>
                         </div>
                     </div>
 
                     <div className="flex-1 overflow-y-auto pr-1">
-                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3 pb-10">
+                        <div 
+                            className="grid gap-3 pb-10"
+                            style={{ gridTemplateColumns: `repeat(${gridCols}, minmax(0, 1fr))` }}
+                        >
                             {studentThreads.map(({ participant, messages }) => (
                                 <CompactChatCard 
                                     key={participant.id} 
@@ -562,11 +601,9 @@
 
             useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }, [messages]);
 
-            // 既読処理: 生徒からの未読メッセージがあれば既読にする
             useEffect(() => {
                 const unreadMsgs = messages.filter(m => m.senderType === 'student' && !m.read && !m.deleted);
                 if (unreadMsgs.length > 0) {
-                    // 通信量を減らすため、最新のものだけ、あるいはすべてをマークするが、ループ注意
                     unreadMsgs.forEach(m => onMarkAsRead(m.id));
                 }
             }, [messages]);
